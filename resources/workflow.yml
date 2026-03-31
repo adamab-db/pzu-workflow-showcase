@@ -1,0 +1,223 @@
+resources:
+  jobs:
+    workflow_showcase:
+      name: "PZU Showcase — Advanced Workflows"
+      tags:
+        demo: "workflow-showcase"
+        session: "2"
+      description: >
+        Demonstrates all Databricks Workflows control flow features:
+        parallel execution, task values, If/Else, For Each, Run If,
+        retries, Run Job, Repair Run, notifications, and scheduling.
+
+      # ── Scheduling (uncomment to demo) ────────────────────────────
+      # schedule:
+      #   quartz_cron_expression: "0 0 6 * * ?"
+      #   timezone_id: Europe/Warsaw
+      #
+      # trigger:
+      #   file_arrival:
+      #     url: /Volumes/catalog/schema/landing/
+      #     min_time_between_triggers_seconds: 60
+
+      # ── Notifications ─────────────────────────────────────────────
+      email_notifications:
+        on_failure:
+          - adam.aboode@databricks.com
+        on_duration_warning_threshold_exceeded:
+          - adam.aboode@databricks.com
+      # webhook_notifications:
+      #   on_failure:
+      #     - id: <slack_webhook_destination_id>
+
+      health:
+        rules:
+          - metric: RUN_DURATION_SECONDS
+            op: GREATER_THAN
+            value: 600
+
+      queue:
+        enabled: true
+      max_concurrent_runs: 1
+
+      # ── Job-level parameters (passed to all tasks) ────────────────
+      parameters:
+        - name: catalog
+          default: ${var.target_catalog}
+        - name: schema
+          default: ${bundle.target}_showcase
+        - name: run_date
+          default: "2026-04-01"
+
+      tasks:
+        # ════════════════════════════════════════════════════════════
+        # STAGE 1: Initialize
+        # ════════════════════════════════════════════════════════════
+
+        - task_key: start_pipeline
+          notebook_task:
+            notebook_path: ../src/notebooks/start_pipeline.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+              run_date: "{{job.parameters.run_date}}"
+          environment_key: default
+
+        # ════════════════════════════════════════════════════════════
+        # STAGE 2: Parallel ingestion (3 branches)
+        # ════════════════════════════════════════════════════════════
+
+        - task_key: ingest_a
+          depends_on:
+            - task_key: start_pipeline
+          notebook_task:
+            notebook_path: ../src/notebooks/ingest_source.py
+            base_parameters:
+              source_name: "claims_db"
+          environment_key: default
+
+        - task_key: ingest_b
+          depends_on:
+            - task_key: start_pipeline
+          notebook_task:
+            notebook_path: ../src/notebooks/ingest_source.py
+            base_parameters:
+              source_name: "policies_db"
+          environment_key: default
+
+        - task_key: ingest_c
+          depends_on:
+            - task_key: start_pipeline
+          notebook_task:
+            notebook_path: ../src/notebooks/ingest_source.py
+            base_parameters:
+              source_name: "sas_export_files"
+          environment_key: default
+
+        # ════════════════════════════════════════════════════════════
+        # STAGE 3: Quality gate (reads task values from all ingests)
+        # ════════════════════════════════════════════════════════════
+
+        - task_key: check_data_quality
+          depends_on:
+            - task_key: ingest_a
+            - task_key: ingest_b
+            - task_key: ingest_c
+          notebook_task:
+            notebook_path: ../src/notebooks/check_quality.py
+          environment_key: default
+
+        # ════════════════════════════════════════════════════════════
+        # STAGE 4: If/Else conditional branching
+        # ════════════════════════════════════════════════════════════
+
+        - task_key: if_quality_passed
+          depends_on:
+            - task_key: check_data_quality
+          condition_task:
+            left: "{{tasks.check_data_quality.values.quality_passed}}"
+            op: EQUAL_TO
+            right: "true"
+
+        # TRUE branch: transform the data
+        - task_key: transform
+          depends_on:
+            - task_key: if_quality_passed
+              outcome: "true"
+          notebook_task:
+            notebook_path: ../src/notebooks/transform.py
+          environment_key: default
+          max_retries: 2
+          min_retry_interval_millis: 10000
+          timeout_seconds: 600
+
+        # FALSE branch: quarantine bad data
+        - task_key: quarantine
+          depends_on:
+            - task_key: if_quality_passed
+              outcome: "false"
+          notebook_task:
+            notebook_path: ../src/notebooks/quarantine.py
+          environment_key: default
+
+        # ════════════════════════════════════════════════════════════
+        # STAGE 5: For Each loop over regions
+        # ════════════════════════════════════════════════════════════
+
+        - task_key: for_each_region
+          depends_on:
+            - task_key: transform
+          for_each_task:
+            inputs: "{{tasks.start_pipeline.values.regions}}"
+            concurrency: 4
+            task:
+              task_key: process_single_region
+              notebook_task:
+                notebook_path: ../src/notebooks/process_region.py
+                base_parameters:
+                  region: "{{input}}"
+              environment_key: default
+
+        # ════════════════════════════════════════════════════════════
+        # STAGE 6: Publish gold layer
+        # ════════════════════════════════════════════════════════════
+
+        - task_key: publish_gold
+          depends_on:
+            - task_key: for_each_region
+          notebook_task:
+            notebook_path: ../src/notebooks/publish_gold.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+          environment_key: default
+
+        # ════════════════════════════════════════════════════════════
+        # STAGE 7: Validate output (toggleable failure for Repair Run demo)
+        # ════════════════════════════════════════════════════════════
+
+        - task_key: validate_output
+          depends_on:
+            - task_key: publish_gold
+          notebook_task:
+            notebook_path: ../src/notebooks/validate_output.py
+            base_parameters:
+              should_fail: "false"   # Set to "true" to demo Repair Run
+          environment_key: default
+
+        # ════════════════════════════════════════════════════════════
+        # STAGE 8: Run Job — trigger child workflow
+        # ════════════════════════════════════════════════════════════
+
+        - task_key: run_child_job
+          depends_on:
+            - task_key: validate_output
+          run_job_task:
+            job_id: ${resources.jobs.child_workflow.id}
+
+        # ════════════════════════════════════════════════════════════
+        # STAGE 9: Completion handlers (Run If conditions)
+        # ════════════════════════════════════════════════════════════
+
+        # Only runs if everything succeeded
+        - task_key: notify_success
+          depends_on:
+            - task_key: run_child_job
+          run_if: ALL_SUCCESS
+          notebook_task:
+            notebook_path: ../src/notebooks/notify_success.py
+          environment_key: default
+
+        # Only runs if something failed
+        - task_key: alert_failure
+          depends_on:
+            - task_key: validate_output
+          run_if: AT_LEAST_ONE_FAILED
+          notebook_task:
+            notebook_path: ../src/notebooks/alert_failure.py
+          environment_key: default
+
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"

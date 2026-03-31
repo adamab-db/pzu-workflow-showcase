@@ -1,0 +1,21 @@
+bundle:
+  name: pzu_workflow_showcase
+
+include:
+  - resources/*.yml
+
+variables:
+  target_catalog:
+    description: The target catalog to write to.
+    default: serverless_stable_379d9b_catalog
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://fevm-serverless-stable-379d9b.cloud.databricks.com
+
+permissions:
+  - user_name: adam.aboode@databricks.com
+    level: CAN_MANAGE

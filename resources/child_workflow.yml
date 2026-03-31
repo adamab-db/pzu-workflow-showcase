@@ -1,0 +1,16 @@
+resources:
+  jobs:
+    child_workflow:
+      name: "PZU Showcase — Child Workflow"
+      tags:
+        demo: "workflow-showcase"
+        role: "child"
+      tasks:
+        - task_key: child_task
+          notebook_task:
+            notebook_path: ../src/notebooks/child_job_task.py
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
