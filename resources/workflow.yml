@@ -194,6 +194,10 @@ resources:
             - task_key: validate_output
           run_job_task:
             job_id: ${resources.jobs.child_workflow.id}
+            job_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+              run_date: "{{tasks.start_pipeline.values.run_date}}"
 
         # ════════════════════════════════════════════════════════════
         # STAGE 9: Completion handlers (Run If conditions)

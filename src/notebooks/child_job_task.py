@@ -7,6 +7,19 @@
 
 # COMMAND ----------
 
+dbutils.widgets.text("catalog", "")
+dbutils.widgets.text("schema", "")
+dbutils.widgets.text("run_date", "")
+
+catalog = dbutils.widgets.get("catalog")
+schema = dbutils.widgets.get("schema")
+run_date = dbutils.widgets.get("run_date")
+
+# COMMAND ----------
+
 print("Child workflow executing...")
-print("This could be: downstream reporting, data export, ML model refresh, etc.")
+print(f"  Catalog:  {catalog}")
+print(f"  Schema:   {schema}")
+print(f"  Run date: {run_date}")
+print("Parameters passed from parent workflow via Run Job task.")
 print("Child workflow complete.")

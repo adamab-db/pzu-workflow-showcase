@@ -5,10 +5,21 @@ resources:
       tags:
         demo: "workflow-showcase"
         role: "child"
+      parameters:
+        - name: catalog
+          default: ""
+        - name: schema
+          default: ""
+        - name: run_date
+          default: ""
       tasks:
         - task_key: child_task
           notebook_task:
             notebook_path: ../src/notebooks/child_job_task.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+              run_date: "{{job.parameters.run_date}}"
           environment_key: default
       environments:
         - environment_key: default
